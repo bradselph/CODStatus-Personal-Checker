@@ -1,3 +1,4 @@
+[![Go](https://github.com/bradselph/CODStatus-Personal-Checker/actions/workflows/GoBuild.yml/badge.svg)](https://github.com/bradselph/CODStatus-Personal-Checker/actions/workflows/GoBuild.yml)
 # CODStatus Personal Checker
 
 CODStatus Personal Checker is a desktop application that allows users to check the status of their Call of Duty account. It provides an easy-to-use interface for validating SSO cookies and checking account status.
