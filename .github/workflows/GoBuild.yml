@@ -1,0 +1,38 @@
+name: Go
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22.5'
+
+    - name: Build
+      run: go build -o CODStatusPersonalChecker.exe .
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: CODStatusPersonalChecker
+        path: ./CODStatusPersonalChecker.exe
+
+    - name: Upload Release Asset
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./CODStatusPersonalChecker.exe
+        asset_name: CODStatusPersonalChecker.exe
+        asset_content_type: application/vnd.microsoft.portable-executable
