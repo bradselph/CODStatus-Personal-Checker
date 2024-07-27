@@ -18,7 +18,7 @@ jobs:
         go-version: '1.22.5'
 
     - name: Build
-      run: go build -o CODStatusPersonalChecker.exe .
+      run: go build .
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
