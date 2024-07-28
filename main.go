@@ -245,6 +245,7 @@ func solveCaptcha(config *Config) (string, error) {
 func createCaptchaTask(config *Config) (string, error) {
 	payload := map[string]interface{}{
 		"clientKey": config.EZCaptchaKey,
+		"appid": "84291",
 		"task": map[string]interface{}{
 			"type":        "ReCaptchaV2TaskProxyless",
 			"websiteURL":  config.PageURL,
