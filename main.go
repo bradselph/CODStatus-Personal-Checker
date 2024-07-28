@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -128,7 +128,7 @@ func loadOrCreateAccounts() {
 }
 
 func loadConfig() {
-	data, err := ioutil.ReadFile(ConfigFileName)
+	data, err := os.ReadFile(ConfigFileName)
 	if err != nil {
 		fmt.Printf("Error reading config file: %v\n", err)
 		return
@@ -147,7 +147,7 @@ func saveConfig() {
 		return
 	}
 
-	err = ioutil.WriteFile(ConfigFileName, data, 0644)
+	err = os.WriteFile(ConfigFileName, data, 0644)
 	if err != nil {
 		fmt.Printf("Error saving config file: %v\n", err)
 	} else {
@@ -182,7 +182,7 @@ func updateConfig() {
 }
 
 func loadAccounts() {
-	data, err := ioutil.ReadFile(AccountsFileName)
+	data, err := os.ReadFile(AccountsFileName)
 	if err != nil {
 		fmt.Printf("Error reading accounts file: %v\n", err)
 		return
@@ -201,7 +201,7 @@ func saveAccounts() {
 		return
 	}
 
-	err = ioutil.WriteFile(AccountsFileName, data, 0644)
+	err = os.WriteFile(AccountsFileName, data, 0644)
 	if err != nil {
 		fmt.Printf("Error saving accounts file: %v\n", err)
 	} else {
@@ -566,7 +566,7 @@ func validateSSOCookie(ssoCookie string) bool {
 		return false
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %v\n", err)
 		return false
@@ -598,7 +598,7 @@ func sendAccountCheckRequest(ssoCookie, captchaResponse string) (string, error) 
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
