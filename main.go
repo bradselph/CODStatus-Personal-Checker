@@ -4,65 +4,70 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	EZCaptchaAPIURL    = "https://api.ez-captcha.com/createTask"
-	EZCaptchaResultURL = "https://api.ez-captcha.com/getTaskResult"
-	AccountCheckURL    = "https://support.activision.com/api/bans/v2/appeal?locale=en"
-	ProfileURL         = "https://support.activision.com/api/profile?accts=false"
-	MaxRetries         = 40
-	RetryInterval      = 3 * time.Second
-	ConfigFileName     = "config.json"
+	EZCaptchaAPIURL      = "https://api.ez-captcha.com/createTask"
+	EZCaptchaResultURL   = "https://api.ez-captcha.com/getTaskResult"
+	EZCaptchaBalanceURL  = "https://api.ez-captcha.com/getBalance"
+	TwoCaptchaAPIURL     = "https://api.2captcha.com/createTask"
+	TwoCaptchaResultURL  = "https://api.2captcha.com/getTaskResult"
+	TwoCaptchaBalanceURL = "https://api.2captcha.com/getBalance"
+	AccountCheckURL      = "https://support.activision.com/api/bans/v2/appeal?locale=en"
+	ProfileURL           = "https://support.activision.com/api/profile?accts=false"
+	MaxRetries           = 40
+	RetryInterval        = 3 * time.Second
+	ConfigFileName       = "config.json"
+	AccountsFileName     = "accounts.json"
+	MaxConcurrentChecks  = 5
+	EZCaptchaAppId       = 84291
 )
 
 type Config struct {
-	SSOCookie    string `json:"sso_cookie"`
-	EZCaptchaKey string `json:"ez_captcha_key"`
-	SiteKey      string `json:"site_key"`
-	PageURL      string `json:"page_url"`
+	EZCaptchaKey            string `json:"ez_captcha_key"`
+	TwoCaptchaKey           string `json:"two_captcha_key"`
+	PreferredCaptchaService string `json:"preferred_captcha_service"`
+	SiteKey                 string `json:"site_key"`
+	PageURL                 string `json:"page_url"`
+	DebugMode               bool   `json:"debug_mode"`
 }
+
+type Account struct {
+	Title     string `json:"title"`
+	SSOCookie string `json:"sso_cookie"`
+}
+
+var (
+	config   Config
+	accounts []Account
+	sem      = make(chan struct{}, MaxConcurrentChecks)
+)
 
 func main() {
 	printIntro()
 
-	config := loadConfig()
-
-	if config == nil {
-		config = getInitialConfig()
-		saveConfig(config)
-	} else {
-		fmt.Println("Configuration loaded from file.")
-		fmt.Println("Enter 'update' to update configuration, or press Enter to continue with saved config.")
-		if readInput() == "update" {
-			updateConfig(config)
-			saveConfig(config)
-		}
-	}
+	loadOrCreateConfig()
+	loadOrCreateAccounts()
 
 	for {
-		fmt.Println("\nEnter 'check' to check account status, 'validate' to validate SSO cookie, or 'exit' to quit:")
+		fmt.Println("\nEnter 'check' to check account status, 'validate' to validate SSO cookies, 'balance' to check captcha solver balance, or 'exit' to quit:")
 		command := readInput()
 
 		switch command {
 		case "check":
-			if validateSSOCookie(config) {
-				checkAccount(config)
-			} else {
-				fmt.Println("Invalid SSO cookie. Please update your configuration.")
-			}
+			checkAccounts()
 		case "validate":
-			if validateSSOCookie(config) {
-				fmt.Println("SSO cookie is valid.")
-			} else {
-				fmt.Println("SSO cookie is invalid. Please update your configuration.")
-			}
+			validateAccounts()
+		case "balance":
+			checkCaptchaBalance()
 		case "exit":
 			fmt.Println("Exiting application.")
 			return
@@ -74,46 +79,75 @@ func main() {
 
 func printIntro() {
 	intro := `
-   ________ ____  _____ _____ __        __              
-  / ____/ // __ \/ ___// ___// /_____ _/ /___  _______  
- / /   / // / / /\__ \ \__ \/ __/ __ '/ __/ / / / ___/  
-/ /___/ // /_/ /___/ /___/ / /_/ /_/ / /_/ /_/ (__  )   
-\____/_(_)____//____//____/\__/\__,_/\__/\__,_/____/    
-                                                        
-    ____                                  __   ________        __           
-   / __ \___  ______________  ____  _____/ /  / ____/ /_  ____/ /_____  _____
-  / /_/ / _ \/ ___/ ___/ __ \/ __ \/ ___/ /  / /   / __ \/ __  / ___/ |/_/ _ \
- / ____/  __/ /  (__  ) /_/ / / / / /  / /  / /___/ / / / /_/ / /__>  </  __/
-/_/    \___/_/  /____/\____/_/ /_/_/  /_/   \____/_/ /_/\__,_/\___/_/|_|\___/ 
-                                                                              
+ ▄████▄   ▒█████  ▓█████▄   ██████ ▄▄▄█████▓ ▄▄▄      ▄▄▄█████▓ █    ██   ██████ 
+▒██▀ ▀█  ▒██▒  ██▒▒██▀ ██▌▒██    ▒ ▓  ██▒ ▓▒▒████▄    ▓  ██▒ ▓▒ ██  ▓██▒▒██    ▒ 
+▒▓█    ▄ ▒██░  ██▒░██   █▌░ ▓██▄   ▒ ▓██░ ▒░▒██  ▀█▄  ▒ ▓██░ ▒░▓██  ▒██░░ ▓██▄   
+▒▓▓▄ ▄██▒▒██   ██░░▓█▄   ▌  ▒   ██▒░ ▓██▓ ░ ░██▄▄▄▄██ ░ ▓██▓ ░ ▓▓█  ░██░  ▒   ██▒
+▒ ▓███▀ ░░ ████▓▒░░▒████▓ ▒██████▒▒  ▒██▒ ░  ▓█   ▓██▒  ▒██▒ ░ ▒▒█████▓ ▒██████▒▒
+░ ░▒ ▒  ░░ ▒░▒░▒░  ▒▒▓  ▒ ▒ ▒▓▒ ▒ ░  ▒ ░░    ▒▒   ▓▒█░  ▒ ░░   ░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░
+  ░  ▒     ░ ▒ ▒░  ░ ▒  ▒ ░ ░▒  ░ ░    ░      ▒   ▒▒ ░    ░    ░░▒░ ░ ░ ░ ░▒  ░ ░
+░        ░ ░ ░ ▒   ░ ░  ░ ░  ░  ░    ░        ░   ▒     ░       ░░░ ░ ░ ░  ░  ░  
+░ ░          ░ ░     ░          ░                 ░  ░            ░           ░  
+░                  ░
 `
 	fmt.Println(intro)
 }
 
-func loadConfig() *Config {
-	data, err := os.ReadFile(ConfigFileName)
-	if err != nil {
-		return nil
+func loadOrCreateConfig() {
+	if _, err := os.Stat(ConfigFileName); os.IsNotExist(err) {
+		config = Config{
+			SiteKey:                 "6LdB2NUpAAAAANcdcy9YcjBOBD4rY-TIHOeolkkk",
+			PageURL:                 "https://support.activision.com",
+			PreferredCaptchaService: "ez_captcha",
+		}
+		saveConfig()
+	} else {
+		loadConfig()
 	}
 
-	var config Config
+	fmt.Println("Configuration loaded. Enter 'update' to update configuration, or press Enter to continue with current config.")
+	if readInput() == "update" {
+		updateConfig()
+		saveConfig()
+	}
+}
+
+func loadOrCreateAccounts() {
+	if _, err := os.Stat(AccountsFileName); os.IsNotExist(err) {
+		accounts = []Account{}
+		saveAccounts()
+	} else {
+		loadAccounts()
+	}
+
+	fmt.Println("Accounts loaded. Enter 'update' to update accounts, or press Enter to continue with current accounts.")
+	if readInput() == "update" {
+		updateAccounts()
+		saveAccounts()
+	}
+}
+
+func loadConfig() {
+	data, err := ioutil.ReadFile(ConfigFileName)
+	if err != nil {
+		fmt.Printf("Error reading config file: %v\n", err)
+		return
+	}
+
 	err = json.Unmarshal(data, &config)
 	if err != nil {
 		fmt.Printf("Error parsing config file: %v\n", err)
-		return nil
 	}
-
-	return &config
 }
 
-func saveConfig(config *Config) {
+func saveConfig() {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		fmt.Printf("Error encoding config: %v\n", err)
 		return
 	}
 
-	err = os.WriteFile(ConfigFileName, data, 0644)
+	err = ioutil.WriteFile(ConfigFileName, data, 0644)
 	if err != nil {
 		fmt.Printf("Error saving config file: %v\n", err)
 	} else {
@@ -121,44 +155,74 @@ func saveConfig(config *Config) {
 	}
 }
 
-func getInitialConfig() *Config {
-	config := &Config{
-		SiteKey: "6LdB2NUpAAAAANcdcy9YcjBOBD4rY-TIHOeolkkk",
-		PageURL: "https://support.activision.com",
-	}
-
-	fmt.Print("Enter your SSO Cookie: ")
-	config.SSOCookie = readInput()
-
-	fmt.Print("Enter your EZ-Captcha API Key: ")
-	config.EZCaptchaKey = readInput()
-
-	return config
-}
-
-func updateConfig(config *Config) {
-	fmt.Printf("Enter your SSO Cookie (current: %s): ", config.SSOCookie)
+func updateConfig() {
+	fmt.Print("Enter your EZ-Captcha API Key (leave empty to keep current): ")
 	input := readInput()
-	if input != "" {
-		config.SSOCookie = input
-	}
-
-	fmt.Printf("Enter your EZ-Captcha API Key (current: %s): ", config.EZCaptchaKey)
-	input = readInput()
 	if input != "" {
 		config.EZCaptchaKey = input
 	}
 
-	fmt.Printf("Enter the Site Key (current: %s): ", config.SiteKey)
+	fmt.Print("Enter your 2Captcha API Key (leave empty to keep current): ")
 	input = readInput()
 	if input != "" {
-		config.SiteKey = input
+		config.TwoCaptchaKey = input
 	}
 
-	fmt.Printf("Enter the Page URL (current: %s): ", config.PageURL)
+	fmt.Print("Enter preferred captcha service (ez_captcha/two_captcha, leave empty to keep current): ")
 	input = readInput()
-	if input != "" {
-		config.PageURL = input
+	if input == "ez_captcha" || input == "two_captcha" {
+		config.PreferredCaptchaService = input
+	}
+
+	fmt.Print("Enter debug mode (true/false, leave empty to keep current): ")
+	input = readInput()
+	if input == "true" || input == "false" {
+		config.DebugMode = (input == "true")
+	}
+}
+
+func loadAccounts() {
+	data, err := ioutil.ReadFile(AccountsFileName)
+	if err != nil {
+		fmt.Printf("Error reading accounts file: %v\n", err)
+		return
+	}
+
+	err = json.Unmarshal(data, &accounts)
+	if err != nil {
+		fmt.Printf("Error parsing accounts file: %v\n", err)
+	}
+}
+
+func saveAccounts() {
+	data, err := json.MarshalIndent(accounts, "", "  ")
+	if err != nil {
+		fmt.Printf("Error encoding accounts: %v\n", err)
+		return
+	}
+
+	err = ioutil.WriteFile(AccountsFileName, data, 0644)
+	if err != nil {
+		fmt.Printf("Error saving accounts file: %v\n", err)
+	} else {
+		fmt.Println("Accounts saved successfully.")
+	}
+}
+
+func updateAccounts() {
+	accounts = []Account{}
+	fmt.Println("Enter accounts in the format 'title:ssocookie', one per line. Enter an empty line when done:")
+	for {
+		input := readInput()
+		if input == "" {
+			break
+		}
+		parts := strings.SplitN(input, ":", 2)
+		if len(parts) == 2 {
+			accounts = append(accounts, Account{Title: parts[0], SSOCookie: parts[1]})
+		} else {
+			fmt.Println("Invalid format. Please use 'title:ssocookie'")
+		}
 	}
 }
 
@@ -168,84 +232,133 @@ func readInput() string {
 	return strings.TrimSpace(input)
 }
 
-func validateSSOCookie(config *Config) bool {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", ProfileURL, nil)
-	if err != nil {
-		fmt.Printf("Error creating request: %v\n", err)
-		return false
-	}
-
-	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", config.SSOCookie))
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Error sending request: %v\n", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Invalid SSO cookie. Status code: %d\n", resp.StatusCode)
-		return false
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response body: %v\n", err)
-		return false
-	}
-
-	if len(body) == 0 {
-		fmt.Println("Invalid SSO cookie. Empty response body.")
-		return false
-	}
-
-	return true
-}
-
-func checkAccount(config *Config) {
-	fmt.Println("Checking account status...")
-
-	captchaResponse, err := solveCaptcha(config)
-	if err != nil {
-		fmt.Printf("Error solving captcha: %v\n", err)
+func checkAccounts() {
+	if len(accounts) == 0 {
+		fmt.Println("No accounts configured. Please update your accounts.")
 		return
 	}
 
-	accountStatus, err := sendAccountCheckRequest(config, captchaResponse)
-	if err != nil {
-		fmt.Printf("Error checking account status: %v\n", err)
-		return
+	fmt.Println("Select accounts to check (comma-separated numbers) or 'all':")
+	for i, account := range accounts {
+		fmt.Printf("%d. %s\n", i+1, account.Title)
 	}
 
-	saveResponseToFile(accountStatus)
+	selection := readInput()
+	var accountsToCheck []Account
 
-	fmt.Println("Account status check complete. Response saved to 'account_status.txt'.")
+	if selection == "all" {
+		accountsToCheck = accounts
+	} else {
+		indices := strings.Split(selection, ",")
+		for _, index := range indices {
+			i, err := strconv.Atoi(strings.TrimSpace(index))
+			if err == nil && i > 0 && i <= len(accounts) {
+				accountsToCheck = append(accountsToCheck, accounts[i-1])
+			}
+		}
+	}
+
+	results := make([]string, len(accountsToCheck))
+	var wg sync.WaitGroup
+
+	fmt.Println("Checking accounts...")
+	for i, account := range accountsToCheck {
+		wg.Add(1)
+		go func(i int, account Account) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			result := checkAccount(account)
+			results[i] = result
+			fmt.Printf("Progress: %d/%d\n", i+1, len(accountsToCheck))
+		}(i, account)
+	}
+
+	wg.Wait()
+
+	for _, result := range results {
+		fmt.Println(result)
+	}
+
+	exportResults(results)
 }
 
-func solveCaptcha(config *Config) (string, error) {
-	taskID, err := createCaptchaTask(config)
-	if err != nil {
-		return "", err
+func checkAccount(account Account) string {
+	if !validateSSOCookie(account.SSOCookie) {
+		return fmt.Sprintf("%s: Invalid SSO cookie", account.Title)
 	}
 
-	for i := 0; i < MaxRetries; i++ {
-		solution, err := getCaptchaResult(config, taskID)
+	captchaResponse, err := solveCaptcha()
+	if err != nil {
+		return fmt.Sprintf("%s: Error solving captcha: %v", account.Title, err)
+	}
+
+	status, err := sendAccountCheckRequest(account.SSOCookie, captchaResponse)
+	if err != nil {
+		return fmt.Sprintf("%s: Error checking account status: %v", account.Title, err)
+	}
+
+	return fmt.Sprintf("%s: %s", account.Title, status)
+}
+
+func validateAccounts() {
+	for _, account := range accounts {
+		isValid := validateSSOCookie(account.SSOCookie)
+		status := "Valid"
+		if !isValid {
+			status = "Invalid"
+		}
+		fmt.Printf("%s: SSO Cookie is %s\n", account.Title, status)
+	}
+}
+
+func checkCaptchaBalance() {
+	if config.EZCaptchaKey != "" {
+		balance, err := getEZCaptchaBalance()
+		if err != nil {
+			fmt.Printf("Error checking EZ-Captcha balance: %v\n", err)
+		} else {
+			fmt.Printf("EZ-Captcha balance: %s\n", balance)
+		}
+	}
+
+	if config.TwoCaptchaKey != "" {
+		balance, err := getTwoCaptchaBalance()
+		if err != nil {
+			fmt.Printf("Error checking 2Captcha balance: %v\n", err)
+		} else {
+			fmt.Printf("2Captcha balance: %s\n", balance)
+		}
+	}
+
+	if config.EZCaptchaKey == "" && config.TwoCaptchaKey == "" {
+		fmt.Println("No captcha solving service configured.")
+	}
+}
+
+func solveCaptcha() (string, error) {
+	if config.PreferredCaptchaService == "ez_captcha" && config.EZCaptchaKey != "" {
+		solution, err := solveEZCaptcha()
 		if err == nil {
 			return solution, nil
 		}
-		time.Sleep(RetryInterval)
+		debugLog(fmt.Sprintf("EZ-Captcha failed: %v. Trying 2Captcha...", err))
 	}
 
-	return "", fmt.Errorf("failed to solve captcha after %d attempts", MaxRetries)
+	if config.TwoCaptchaKey != "" {
+		return solveTwoCaptcha()
+	}
+
+	return "", fmt.Errorf("no valid captcha solving service configured")
 }
 
-func createCaptchaTask(config *Config) (string, error) {
+func solveEZCaptcha() (string, error) {
+	debugLog("Starting EZ-Captcha solving process")
+
 	payload := map[string]interface{}{
 		"clientKey": config.EZCaptchaKey,
-		"appid": "84291",
+		"appId":     EZCaptchaAppId,
 		"task": map[string]interface{}{
 			"type":        "ReCaptchaV2TaskProxyless",
 			"websiteURL":  config.PageURL,
@@ -262,17 +375,38 @@ func createCaptchaTask(config *Config) (string, error) {
 	defer resp.Body.Close()
 
 	var result struct {
-		TaskID string `json:"taskId"`
+		ErrorId          int    `json:"errorId"`
+		ErrorCode        string `json:"errorCode"`
+		ErrorDescription string `json:"errorDescription"`
+		TaskId           string `json:"taskId"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 
-	return result.TaskID, nil
+	if result.ErrorId != 0 {
+		return "", fmt.Errorf("EZ-Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+	}
+
+	debugLog(fmt.Sprintf("EZ-Captcha task created: %s", result.TaskId))
+
+	for i := 0; i < MaxRetries; i++ {
+		time.Sleep(RetryInterval)
+
+		solution, err := getEZCaptchaResult(result.TaskId)
+		if err == nil {
+			debugLog("EZ-Captcha solved successfully")
+			return solution, nil
+		}
+
+		debugLog(fmt.Sprintf("EZ-Captcha solving attempt %d failed: %v", i+1, err))
+	}
+
+	return "", fmt.Errorf("failed to solve EZ-Captcha after %d attempts", MaxRetries)
 }
 
-func getCaptchaResult(config *Config, taskID string) (string, error) {
+func getEZCaptchaResult(taskId string) (string, error) {
 	payload := map[string]string{
 		"clientKey": config.EZCaptchaKey,
-		"taskId":    taskID,
+		"taskId":    taskId,
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
@@ -297,7 +431,156 @@ func getCaptchaResult(config *Config, taskID string) (string, error) {
 	return "", fmt.Errorf("captcha not ready")
 }
 
-func sendAccountCheckRequest(config *Config, captchaResponse string) (string, error) {
+func solveTwoCaptcha() (string, error) {
+	debugLog("Starting 2Captcha solving process")
+
+	payload := map[string]interface{}{
+		"clientKey": config.TwoCaptchaKey,
+		"task": map[string]interface{}{
+			"type":       "RecaptchaV2TaskProxyless",
+			"websiteURL": config.PageURL,
+			"websiteKey": config.SiteKey,
+		},
+	}
+
+	jsonPayload, _ := json.Marshal(payload)
+	resp, err := http.Post(TwoCaptchaAPIURL, "application/json", strings.NewReader(string(jsonPayload)))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrorId          int    `json:"errorId"`
+		ErrorCode        string `json:"errorCode"`
+		ErrorDescription string `json:"errorDescription"`
+		TaskId           int    `json:"taskId"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.ErrorId != 0 {
+		return "", fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+	}
+
+	debugLog(fmt.Sprintf("2Captcha task created: %d", result.TaskId))
+
+	for i := 0; i < MaxRetries; i++ {
+		time.Sleep(RetryInterval)
+
+		solution, err := getTwoCaptchaResult(result.TaskId)
+		if err == nil {
+			debugLog("2Captcha solved successfully")
+			return solution, nil
+		}
+
+		debugLog(fmt.Sprintf("2Captcha solving attempt %d failed: %v", i+1, err))
+	}
+
+	return "", fmt.Errorf("failed to solve 2Captcha after %d attempts", MaxRetries)
+}
+
+func getTwoCaptchaResult(taskId int) (string, error) {
+	payload := map[string]interface{}{
+		"clientKey": config.TwoCaptchaKey,
+		"taskId":    taskId,
+	}
+
+	jsonPayload, _ := json.Marshal(payload)
+	resp, err := http.Post(TwoCaptchaResultURL, "application/json", strings.NewReader(string(jsonPayload)))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrorId          int    `json:"errorId"`
+		ErrorCode        string `json:"errorCode"`
+		ErrorDescription string `json:"errorDescription"`
+		Status           string `json:"status"`
+		Solution         struct {
+			GRecaptchaResponse string `json:"gRecaptchaResponse"`
+		} `json:"solution"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.Status == "ready" {
+		return result.Solution.GRecaptchaResponse, nil
+	}
+
+	return "", fmt.Errorf("captcha not ready")
+}
+
+func report2CaptchaResult(taskId int, success bool) error {
+	payload := map[string]interface{}{
+		"clientKey": config.TwoCaptchaKey,
+		"taskId":    taskId,
+	}
+
+	var endpoint string
+	if success {
+		endpoint = "https://api.2captcha.com/reportCorrect"
+	} else {
+		endpoint = "https://api.2captcha.com/reportIncorrect"
+	}
+
+	jsonPayload, _ := json.Marshal(payload)
+	resp, err := http.Post(endpoint, "application/json", strings.NewReader(string(jsonPayload)))
+	if err != nil {
+		return fmt.Errorf("network error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrorId          int    `json:"errorId"`
+		ErrorCode        string `json:"errorCode"`
+		ErrorDescription string `json:"errorDescription"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.ErrorId != 0 {
+		return fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+	}
+
+	return nil
+}
+func validateSSOCookie(ssoCookie string) bool {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", ProfileURL, nil)
+	if err != nil {
+		fmt.Printf("Error creating request: %v\n", err)
+		return false
+	}
+
+	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", ssoCookie))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Invalid SSO cookie. Status code: %d\n", resp.StatusCode)
+		return false
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %v\n", err)
+		return false
+	}
+
+	if len(body) == 0 {
+		fmt.Println("Invalid SSO cookie. Empty response body.")
+		return false
+	}
+
+	return true
+}
+
+func sendAccountCheckRequest(ssoCookie, captchaResponse string) (string, error) {
 	client := &http.Client{}
 
 	reqURL := fmt.Sprintf("%s&g-cc=%s", AccountCheckURL, url.QueryEscape(captchaResponse))
@@ -306,7 +589,7 @@ func sendAccountCheckRequest(config *Config, captchaResponse string) (string, er
 		return "", err
 	}
 
-	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", config.SSOCookie))
+	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", ssoCookie))
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
 
 	resp, err := client.Do(req)
@@ -315,17 +598,115 @@ func sendAccountCheckRequest(config *Config, captchaResponse string) (string, er
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 
-	return string(body), nil
+	var result struct {
+		Error     string `json:"error"`
+		Success   string `json:"success"`
+		CanAppeal bool   `json:"canAppeal"`
+		Bans      []struct {
+			Enforcement string `json:"enforcement"`
+			Title       string `json:"title"`
+			CanAppeal   bool   `json:"canAppeal"`
+		} `json:"bans"`
+	}
+
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if result.Error != "" {
+		return "", fmt.Errorf("API error: %s", result.Error)
+	}
+
+	if len(result.Bans) == 0 {
+		return "Account not banned", nil
+	}
+
+	var status string
+	for _, ban := range result.Bans {
+		switch ban.Enforcement {
+		case "PERMANENT":
+			status = "Permanently banned"
+		case "UNDER_REVIEW":
+			status = "Shadowbanned"
+		default:
+			status = "Unknown ban status"
+		}
+		break
+	}
+
+	return status, nil
 }
 
-func saveResponseToFile(response string) {
-	err := os.WriteFile("account_status.txt", []byte(response), 0644)
+func exportResults(results []string) {
+	filename := fmt.Sprintf("account_status_%s.txt", time.Now().Format("2006-01-02_15-04-05"))
+	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Printf("Error saving response to file: %v\n", err)
+		fmt.Printf("Error creating file: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	for _, result := range results {
+		_, err := file.WriteString(result + "\n")
+		if err != nil {
+			fmt.Printf("Error writing to file: %v\n", err)
+			return
+		}
+	}
+
+	fmt.Printf("Results exported to %s\n", filename)
+}
+
+func getEZCaptchaBalance() (string, error) {
+	resp, err := http.Get(fmt.Sprintf("%s?clientKey=%s", EZCaptchaBalanceURL, config.EZCaptchaKey))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrorId          int     `json:"errorId"`
+		Balance          float64 `json:"balance"`
+		ErrorCode        string  `json:"errorCode"`
+		ErrorDescription string  `json:"errorDescription"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.ErrorId != 0 {
+		return "", fmt.Errorf("EZ-Captcha error: %d", result.ErrorId)
+	}
+
+	return fmt.Sprintf("%.2f", result.Balance), nil
+}
+
+func getTwoCaptchaBalance() (string, error) {
+	resp, err := http.Get(fmt.Sprintf("%s?key=%s&action=getBalance&json=1", TwoCaptchaBalanceURL, config.TwoCaptchaKey))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Status  int     `json:"status"`
+		Balance float64 `json:"balance"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.Status != 1 {
+		return "", fmt.Errorf("2Captcha error: Invalid response")
+	}
+
+	return fmt.Sprintf("%.2f", result.Balance), nil
+}
+
+func debugLog(message string) {
+	if config.DebugMode {
+		fmt.Printf("[DEBUG] %s\n", message)
 	}
 }
