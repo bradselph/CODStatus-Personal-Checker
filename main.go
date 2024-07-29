@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,29 +16,29 @@ import (
 )
 
 const (
-	EZCaptchaAPIURL      = "https://api.ez-captcha.com/createTask"
-	EZCaptchaResultURL   = "https://api.ez-captcha.com/getTaskResult"
-	EZCaptchaBalanceURL  = "https://api.ez-captcha.com/getBalance"
-	TwoCaptchaAPIURL     = "https://api.2captcha.com/createTask"
-	TwoCaptchaResultURL  = "https://api.2captcha.com/getTaskResult"
-	TwoCaptchaBalanceURL = "https://api.2captcha.com/getBalance"
-	AccountCheckURL      = "https://support.activision.com/api/bans/v2/appeal?locale=en"
-	ProfileURL           = "https://support.activision.com/api/profile?accts=false"
-	MaxRetries           = 40
-	RetryInterval        = 3 * time.Second
-	ConfigFileName       = "config.json"
-	AccountsFileName     = "accounts.json"
-	MaxConcurrentChecks  = 5
-	EZCaptchaAppId       = 84291
+	EZCaptchaAPIURL     = "https://api.ez-captcha.com/createTask"
+	EZCaptchaResultURL  = "https://api.ez-captcha.com/getTaskResult"
+	EZCaptchaBalanceURL = "https://api.ez-captcha.com/getBalance"
+	/*	TwoCaptchaAPIURL     = "https://api.2captcha.com/createTask"
+		/	TwoCaptchaResultURL  = "https://api.2captcha.com/getTaskResult"
+			TwoCaptchaBalanceURL = "https://api.2captcha.com/getBalance"
+	*/AccountCheckURL   = "https://support.activision.com/api/bans/v2/appeal?locale=en"
+	ProfileURL          = "https://support.activision.com/api/profile?accts=false"
+	MaxRetries          = 22
+	RetryInterval       = 5 * time.Second
+	ConfigFileName      = "config.json"
+	AccountsFileName    = "accounts.json"
+	MaxConcurrentChecks = 5
+	EZCaptchaAppId      = 84291
 )
 
 type Config struct {
-	EZCaptchaKey            string `json:"ez_captcha_key"`
-	TwoCaptchaKey           string `json:"two_captcha_key"`
-	PreferredCaptchaService string `json:"preferred_captcha_service"`
-	SiteKey                 string `json:"site_key"`
-	PageURL                 string `json:"page_url"`
-	DebugMode               bool   `json:"debug_mode"`
+	EZCaptchaKey string `json:"ez_captcha_key"`
+	/*	TwoCaptchaKey           string `json:"two_captcha_key"`
+		PreferredCaptchaService string `json:"preferred_captcha_service"`
+	*/SiteKey string `json:"site_key"`
+	PageURL   string `json:"page_url"`
+	DebugMode bool   `json:"debug_mode"`
 }
 
 type Account struct {
@@ -96,9 +97,9 @@ func printIntro() {
 func loadOrCreateConfig() {
 	if _, err := os.Stat(ConfigFileName); os.IsNotExist(err) {
 		config = Config{
-			SiteKey:                 "6LdB2NUpAAAAANcdcy9YcjBOBD4rY-TIHOeolkkk",
-			PageURL:                 "https://support.activision.com",
-			PreferredCaptchaService: "ez_captcha",
+			SiteKey: "6LdB2NUpAAAAANcdcy9YcjBOBD4rY-TIHOeolkkk",
+			PageURL: "https://support.activision.com",
+			//			PreferredCaptchaService: "ez_captcha",
 		}
 		saveConfig()
 	} else {
@@ -162,18 +163,18 @@ func updateConfig() {
 		config.EZCaptchaKey = input
 	}
 
-	fmt.Print("Enter your 2Captcha API Key (leave empty to keep current): ")
-	input = readInput()
-	if input != "" {
-		config.TwoCaptchaKey = input
-	}
+	/*	fmt.Print("Enter your 2Captcha API Key (leave empty to keep current): ")
+		input = readInput()
+		if input != "" {
+			config.TwoCaptchaKey = input
+		}
 
-	fmt.Print("Enter preferred captcha service (ez_captcha/two_captcha, leave empty to keep current): ")
-	input = readInput()
-	if input == "ez_captcha" || input == "two_captcha" {
-		config.PreferredCaptchaService = input
-	}
-
+		fmt.Print("Enter preferred captcha service (ez_captcha/two_captcha, leave empty to keep current): ")
+		input = readInput()
+		if input == "ez_captcha" || input == "two_captcha" {
+			config.PreferredCaptchaService = input
+		}
+	*/
 	fmt.Print("Enter debug mode (true/false, leave empty to keep current): ")
 	input = readInput()
 	if input == "true" || input == "false" {
@@ -314,43 +315,46 @@ func validateAccounts() {
 }
 
 func checkCaptchaBalance() {
-	if config.EZCaptchaKey != "" {
-		balance, err := getEZCaptchaBalance()
-		if err != nil {
-			fmt.Printf("Error checking EZ-Captcha balance: %v\n", err)
-		} else {
-			fmt.Printf("EZ-Captcha balance: %s\n", balance)
-		}
-	}
-
-	if config.TwoCaptchaKey != "" {
-		balance, err := getTwoCaptchaBalance()
-		if err != nil {
-			fmt.Printf("Error checking 2Captcha balance: %v\n", err)
-		} else {
-			fmt.Printf("2Captcha balance: %s\n", balance)
-		}
-	}
-
-	if config.EZCaptchaKey == "" && config.TwoCaptchaKey == "" {
-		fmt.Println("No captcha solving service configured.")
+	//	if config.EZCaptchaKey != "" {
+	balance, err := getEZCaptchaBalance()
+	if err != nil {
+		fmt.Printf("Error checking EZ-Captcha balance: %v\n", err)
+	} else {
+		fmt.Printf("EZ-Captcha balance: %s\n", balance)
 	}
 }
 
-func solveCaptcha() (string, error) {
-	if config.PreferredCaptchaService == "ez_captcha" && config.EZCaptchaKey != "" {
-		solution, err := solveEZCaptcha()
-		if err == nil {
-			return solution, nil
+/*
+		if config.TwoCaptchaKey != "" {
+			balance, err := getTwoCaptchaBalance()
+			if err != nil {
+				fmt.Printf("Error checking 2Captcha balance: %v\n", err)
+			} else {
+				fmt.Printf("2Captcha balance: %s\n", balance)
+			}
 		}
-		debugLog(fmt.Sprintf("EZ-Captcha failed: %v. Trying 2Captcha...", err))
-	}
 
-	if config.TwoCaptchaKey != "" {
-		return solveTwoCaptcha()
+		if config.EZCaptchaKey == "" && config.TwoCaptchaKey == "" {
+			fmt.Println("No captcha solving service configured.")
+		}
 	}
+*/
+func solveCaptcha() (string, error) {
+	return solveEZCaptcha()
+	/*	if config.PreferredCaptchaService == "ez_captcha" && config.EZCaptchaKey != "" {
+			solution, err := solveEZCaptcha()
+			if err == nil {
+				return solution, nil
+			}
+			debugLog(fmt.Sprintf("EZ-Captcha failed: %v. Trying 2Captcha...", err))
+		}
 
-	return "", fmt.Errorf("no valid captcha solving service configured")
+		if config.TwoCaptchaKey != "" {
+			return solveTwoCaptcha()
+		}
+
+		return "", fmt.Errorf("no valid captcha solving service configured")
+	*/
 }
 
 func solveEZCaptcha() (string, error) {
@@ -431,118 +435,120 @@ func getEZCaptchaResult(taskId string) (string, error) {
 	return "", fmt.Errorf("captcha not ready")
 }
 
-func solveTwoCaptcha() (string, error) {
-	debugLog("Starting 2Captcha solving process")
+/*
+	func solveTwoCaptcha() (string, error) {
+		debugLog("Starting 2Captcha solving process")
 
-	payload := map[string]interface{}{
-		"clientKey": config.TwoCaptchaKey,
-		"task": map[string]interface{}{
-			"type":       "RecaptchaV2TaskProxyless",
-			"websiteURL": config.PageURL,
-			"websiteKey": config.SiteKey,
-		},
-	}
-
-	jsonPayload, _ := json.Marshal(payload)
-	resp, err := http.Post(TwoCaptchaAPIURL, "application/json", strings.NewReader(string(jsonPayload)))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		ErrorId          int    `json:"errorId"`
-		ErrorCode        string `json:"errorCode"`
-		ErrorDescription string `json:"errorDescription"`
-		TaskId           int    `json:"taskId"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if result.ErrorId != 0 {
-		return "", fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
-	}
-
-	debugLog(fmt.Sprintf("2Captcha task created: %d", result.TaskId))
-
-	for i := 0; i < MaxRetries; i++ {
-		time.Sleep(RetryInterval)
-
-		solution, err := getTwoCaptchaResult(result.TaskId)
-		if err == nil {
-			debugLog("2Captcha solved successfully")
-			return solution, nil
+		payload := map[string]interface{}{
+			"clientKey": config.TwoCaptchaKey,
+			"task": map[string]interface{}{
+				"type":       "RecaptchaV2TaskProxyless",
+				"websiteURL": config.PageURL,
+				"websiteKey": config.SiteKey,
+			},
 		}
 
-		debugLog(fmt.Sprintf("2Captcha solving attempt %d failed: %v", i+1, err))
+		jsonPayload, _ := json.Marshal(payload)
+		resp, err := http.Post(TwoCaptchaAPIURL, "application/json", strings.NewReader(string(jsonPayload)))
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			ErrorId          int    `json:"errorId"`
+			ErrorCode        string `json:"errorCode"`
+			ErrorDescription string `json:"errorDescription"`
+			TaskId           int    `json:"taskId"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result.ErrorId != 0 {
+			return "", fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+		}
+
+		debugLog(fmt.Sprintf("2Captcha task created: %d", result.TaskId))
+
+		for i := 0; i < MaxRetries; i++ {
+			time.Sleep(RetryInterval)
+
+			solution, err := getTwoCaptchaResult(result.TaskId)
+			if err == nil {
+				debugLog("2Captcha solved successfully")
+				return solution, nil
+			}
+
+			debugLog(fmt.Sprintf("2Captcha solving attempt %d failed: %v", i+1, err))
+		}
+
+		return "", fmt.Errorf("failed to solve 2Captcha after %d attempts", MaxRetries)
 	}
 
-	return "", fmt.Errorf("failed to solve 2Captcha after %d attempts", MaxRetries)
-}
+	func getTwoCaptchaResult(taskId int) (string, error) {
+		payload := map[string]interface{}{
+			"clientKey": config.TwoCaptchaKey,
+			"taskId":    taskId,
+		}
 
-func getTwoCaptchaResult(taskId int) (string, error) {
-	payload := map[string]interface{}{
-		"clientKey": config.TwoCaptchaKey,
-		"taskId":    taskId,
+		jsonPayload, _ := json.Marshal(payload)
+		resp, err := http.Post(TwoCaptchaResultURL, "application/json", strings.NewReader(string(jsonPayload)))
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			ErrorId          int    `json:"errorId"`
+			ErrorCode        string `json:"errorCode"`
+			ErrorDescription string `json:"errorDescription"`
+			Status           string `json:"status"`
+			Solution         struct {
+				GRecaptchaResponse string `json:"gRecaptchaResponse"`
+			} `json:"solution"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result.Status == "ready" {
+			return result.Solution.GRecaptchaResponse, nil
+		}
+
+		return "", fmt.Errorf("captcha not ready")
 	}
 
-	jsonPayload, _ := json.Marshal(payload)
-	resp, err := http.Post(TwoCaptchaResultURL, "application/json", strings.NewReader(string(jsonPayload)))
-	if err != nil {
-		return "", err
+	func report2CaptchaResult(taskId int, success bool) error {
+		payload := map[string]interface{}{
+			"clientKey": config.TwoCaptchaKey,
+			"taskId":    taskId,
+		}
+
+		var endpoint string
+		if success {
+			endpoint = "https://api.2captcha.com/reportCorrect"
+		} else {
+			endpoint = "https://api.2captcha.com/reportIncorrect"
+		}
+
+		jsonPayload, _ := json.Marshal(payload)
+		resp, err := http.Post(endpoint, "application/json", strings.NewReader(string(jsonPayload)))
+		if err != nil {
+			return fmt.Errorf("network error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			ErrorId          int    `json:"errorId"`
+			ErrorCode        string `json:"errorCode"`
+			ErrorDescription string `json:"errorDescription"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result.ErrorId != 0 {
+			return fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+		}
+
+		return nil
 	}
-	defer resp.Body.Close()
-
-	var result struct {
-		ErrorId          int    `json:"errorId"`
-		ErrorCode        string `json:"errorCode"`
-		ErrorDescription string `json:"errorDescription"`
-		Status           string `json:"status"`
-		Solution         struct {
-			GRecaptchaResponse string `json:"gRecaptchaResponse"`
-		} `json:"solution"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if result.Status == "ready" {
-		return result.Solution.GRecaptchaResponse, nil
-	}
-
-	return "", fmt.Errorf("captcha not ready")
-}
-
-func report2CaptchaResult(taskId int, success bool) error {
-	payload := map[string]interface{}{
-		"clientKey": config.TwoCaptchaKey,
-		"taskId":    taskId,
-	}
-
-	var endpoint string
-	if success {
-		endpoint = "https://api.2captcha.com/reportCorrect"
-	} else {
-		endpoint = "https://api.2captcha.com/reportIncorrect"
-	}
-
-	jsonPayload, _ := json.Marshal(payload)
-	resp, err := http.Post(endpoint, "application/json", strings.NewReader(string(jsonPayload)))
-	if err != nil {
-		return fmt.Errorf("network error: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		ErrorId          int    `json:"errorId"`
-		ErrorCode        string `json:"errorCode"`
-		ErrorDescription string `json:"errorDescription"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if result.ErrorId != 0 {
-		return fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
-	}
-
-	return nil
-}
+*/
 func validateSSOCookie(ssoCookie string) bool {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", ProfileURL, nil)
@@ -664,7 +670,16 @@ func exportResults(results []string) {
 }
 
 func getEZCaptchaBalance() (string, error) {
-	resp, err := http.Get(fmt.Sprintf("%s?clientKey=%s", EZCaptchaBalanceURL, config.EZCaptchaKey))
+	payload := map[string]string{
+		"clientKey": config.EZCaptchaKey,
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("error creating JSON payload: %v", err)
+	}
+
+	resp, err := http.Post(EZCaptchaBalanceURL, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return "", err
 	}
@@ -676,32 +691,50 @@ func getEZCaptchaBalance() (string, error) {
 		ErrorCode        string  `json:"errorCode"`
 		ErrorDescription string  `json:"errorDescription"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return "", fmt.Errorf("error decoding response: %v", err)
+	}
 
 	if result.ErrorId != 0 {
-		return "", fmt.Errorf("EZ-Captcha error: %d", result.ErrorId)
+		return "", fmt.Errorf("EZ-Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
 	}
 
-	return fmt.Sprintf("%.2f", result.Balance), nil
-}
+	/*
+	   return fmt.Sprintf("%.2f", result.Balance), nil
+	   }
 
-func getTwoCaptchaBalance() (string, error) {
-	resp, err := http.Get(fmt.Sprintf("%s?key=%s&action=getBalance&json=1", TwoCaptchaBalanceURL, config.TwoCaptchaKey))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+	   func getTwoCaptchaBalance() (string, error) {
+	   	payload := map[string]string{
+	   		"clientKey": config.TwoCaptchaKey,
+	   	}
 
-	var result struct {
-		Status  int     `json:"status"`
-		Balance float64 `json:"balance"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	   	jsonPayload, err := json.Marshal(payload)
+	   	if err != nil {
+	   		return "", fmt.Errorf("error creating JSON payload: %v", err)
+	   	}
 
-	if result.Status != 1 {
-		return "", fmt.Errorf("2Captcha error: Invalid response")
-	}
+	   	resp, err := http.Post(TwoCaptchaBalanceURL, "application/json", bytes.NewBuffer(jsonPayload))
+	   	if err != nil {
+	   		return "", err
+	   	}
+	   	defer resp.Body.Close()
 
+	   	var result struct {
+	   		ErrorId          int     `json:"errorId"`
+	   		Balance          float64 `json:"balance"`
+	   		ErrorCode        string  `json:"errorCode"`
+	   		ErrorDescription string  `json:"errorDescription"`
+	   	}
+	   	err = json.NewDecoder(resp.Body).Decode(&result)
+	   	if err != nil {
+	   		return "", fmt.Errorf("error decoding response: %v", err)
+	   	}
+
+	   	if result.ErrorId != 0 {
+	   		return "", fmt.Errorf("2Captcha error: %s - %s", result.ErrorCode, result.ErrorDescription)
+	   	}
+	*/
 	return fmt.Sprintf("%.2f", result.Balance), nil
 }
 
