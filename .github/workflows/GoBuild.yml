@@ -26,6 +26,11 @@ jobs:
         name: CODStatusPersonalChecker
         path: ./CODStatusPersonalChecker.exe
 
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v4.0.1
+      with:
+         token: ${{ secrets.CODECOV_TOKEN }}
+    
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: actions/upload-release-asset@v1
@@ -36,3 +41,4 @@ jobs:
         asset_path: ./CODStatusPersonalChecker.exe
         asset_name: CODStatusPersonalChecker.exe
         asset_content_type: application/vnd.microsoft.portable-executable
+        
