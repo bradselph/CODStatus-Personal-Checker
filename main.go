@@ -24,11 +24,11 @@ const (
 			TwoCaptchaBalanceURL = "https://api.2captcha.com/getBalance"
 	*/AccountCheckURL   = "https://support.activision.com/api/bans/v2/appeal?locale=en"
 	ProfileURL          = "https://support.activision.com/api/profile?accts=false"
-	MaxRetries          = 22
-	RetryInterval       = 5 * time.Second
+	MaxRetries          = 12
+	RetryInterval       = 10 * time.Second
 	ConfigFileName      = "config.json"
 	AccountsFileName    = "accounts.json"
-	MaxConcurrentChecks = 5
+	MaxConcurrentChecks = 25
 	EZCaptchaAppId      = 84291
 )
 
