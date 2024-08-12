@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,6 +290,118 @@ func readInput() string {
 	return strings.TrimSpace(input)
 }
 
+func loginAndSaveSSO() {
+	fmt.Println("Running Python login script...")
+	cmd := exec.Command("python", "login_script.py")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("Error running Python script: %v\n", err)
+		return
+	}
+
+	var results []map[string]interface{}
+	err = json.Unmarshal(out.Bytes(), &results)
+	if err != nil {
+		fmt.Printf("Error parsing Python script output: %v\n", err)
+		return
+	}
+
+	for _, result := range results {
+		email, _ := result["email"].(string)
+		success, _ := result["success"].(bool)
+		if success {
+			cookie, _ := result["cookie"].(string)
+			username, _ := result["username"].(string)
+			unoID, _ := result["uno_id"].(string)
+
+			// Check if account already exists
+			existingIndex := -1
+			for i, acc := range accounts {
+				if acc.Title == email {
+					existingIndex = i
+					break
+				}
+			}
+
+			if existingIndex != -1 {
+				// Update existing account
+				accounts[existingIndex].SSOCookie = cookie
+				fmt.Printf("Updated SSO cookie for existing account: %s\n", email)
+			} else {
+				// Add new account
+				accounts = append(accounts, Account{
+					Title:     email,
+					SSOCookie: cookie,
+				})
+				fmt.Printf("Added new account: %s\n", email)
+			}
+
+			fmt.Printf("Successfully logged in and saved SSO cookie for %s (Username: %s, UNO ID: %s)\n", email, username, unoID)
+		} else {
+			errorMsg, _ := result["error"].(string)
+			fmt.Printf("Failed to log in for %s: %s\n", email, errorMsg)
+		}
+	}
+
+	saveAccounts()
+}
+
+func validateAccounts() {
+	for i, account := range accounts {
+		isValid := validateSSOCookie(account.SSOCookie)
+		status := "Valid"
+		if !isValid {
+			status = "Invalid"
+			// Remove invalid SSO cookie
+			accounts[i].SSOCookie = ""
+		}
+		fmt.Printf("%s: SSO Cookie is %s\n", account.Title, status)
+	}
+
+	// Save accounts after validation
+	saveAccounts()
+}
+
+func validateSSOCookie(ssoCookie string) bool {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", ProfileURL, nil)
+	if err != nil {
+		fmt.Printf("Error creating request: %v\n", err)
+		return false
+	}
+
+	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", ssoCookie))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, "+
+		"like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Invalid SSO cookie. Status code: %d\n", resp.StatusCode)
+		return false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %v\n", err)
+		return false
+	}
+
+	if len(body) == 0 {
+		fmt.Println("Invalid SSO cookie. Empty response body.")
+		return false
+	}
+
+	return true
+}
+
 func checkAccounts() {
 	if len(accounts) == 0 {
 		fmt.Println("No accounts configured. Please update your accounts.")
@@ -357,17 +470,6 @@ func checkAccount(account Account) string {
 	}
 
 	return fmt.Sprintf("%s: %s", account.Title, status)
-}
-
-func validateAccounts() {
-	for _, account := range accounts {
-		isValid := validateSSOCookie(account.SSOCookie)
-		status := "Valid"
-		if !isValid {
-			status = "Invalid"
-		}
-		fmt.Printf("%s: SSO Cookie is %s\n", account.Title, status)
-	}
 }
 
 func checkCaptchaBalance() {
@@ -459,43 +561,6 @@ func getEZCaptchaResult(taskId string) (string, error) {
 	}
 
 	return "", fmt.Errorf("captcha not ready")
-}
-
-func validateSSOCookie(ssoCookie string) bool {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", ProfileURL, nil)
-	if err != nil {
-		fmt.Printf("Error creating request: %v\n", err)
-		return false
-	}
-
-	req.Header.Set("Cookie", fmt.Sprintf("ACT_SSO_COOKIE=%s", ssoCookie))
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Error sending request: %v\n", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Invalid SSO cookie. Status code: %d\n", resp.StatusCode)
-		return false
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response body: %v\n", err)
-		return false
-	}
-
-	if len(body) == 0 {
-		fmt.Println("Invalid SSO cookie. Empty response body.")
-		return false
-	}
-
-	return true
 }
 
 func sendAccountCheckRequest(ssoCookie, captchaResponse string) (string, error) {
@@ -621,31 +686,32 @@ func debugLog(message string) {
 	}
 }
 
-func loginAndSaveSSO() {
-	if len(loginCredentials) == 0 {
-		fmt.Println("No login credentials configured. Please update your credentials.")
-		return
-	}
-
-	for _, cred := range loginCredentials {
-		fmt.Printf("Attempting to log in with email: %s\n", cred.Email)
-		ssoCookie, err := login(cred.Email, cred.Password)
-		if err != nil {
-			fmt.Printf("Error logging in with email %s: %v\n", cred.Email, err)
-			continue
+/*
+	func loginAndSaveSSO() {
+		if len(loginCredentials) == 0 {
+			fmt.Println("No login credentials configured. Please update your credentials.")
+			return
 		}
 
-		accounts = append(accounts, Account{
-			Title:     cred.Email,
-			SSOCookie: ssoCookie,
-		})
+		for _, cred := range loginCredentials {
+			fmt.Printf("Attempting to log in with email: %s\n", cred.Email)
+			ssoCookie, err := login(cred.Email, cred.Password)
+			if err != nil {
+				fmt.Printf("Error logging in with email %s: %v\n", cred.Email, err)
+				continue
+			}
 
-		fmt.Printf("Successfully logged in and saved SSO cookie and XSRF token for %s\n", cred.Email)
+			accounts = append(accounts, Account{
+				Title:     cred.Email,
+				SSOCookie: ssoCookie,
+			})
+
+			fmt.Printf("Successfully logged in and saved SSO cookie and XSRF token for %s\n", cred.Email)
+		}
+
+		saveAccounts()
 	}
-
-	saveAccounts()
-}
-
+*/
 func login(email, password string) (string, error) {
 	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {
