@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
 from typing import List, Dict
 import time
 
@@ -19,9 +20,10 @@ CONFIG_FILE_NAME = "config.json"
 ACCOUNTS_FILE_NAME = "accounts.json"
 CREDENTIALS_FILE_NAME = "login_credentials.json"
 SUPPORT_URL = "https://support.activision.com"
-LOGIN_URL = "https://s.activision.com/activision/login"
+LOGIN_URL = "https://s.activision.com/do_login?new_SiteId=activision"
 PROFILE_URL = "https://support.activision.com/api/profile"
 LOGIN_TIMEOUT = 120  # seconds
+CAPTCHA_TIMEOUT = 120  # seconds
 
 class Config:
     def __init__(self):
@@ -123,8 +125,8 @@ async def solve_captcha() -> str:
                 "taskId": task_id
             }
 
-            max_attempts = 30
-            for attempt in range(max_attempts):
+            start_time = time.time()
+            while time.time() - start_time < CAPTCHA_TIMEOUT:
                 async with session.post(get_result_url, json=get_result_payload, headers=headers) as response:
                     if response.status != 200:
                         logging.error(f"Error getting captcha result. Status: {response.status}")
@@ -134,11 +136,15 @@ async def solve_captcha() -> str:
                         logging.info("Captcha solved successfully")
                         return result.get("solution", {}).get("gRecaptchaResponse")
                     elif result.get("status") == "processing":
-                        logging.debug(f"Captcha solving attempt {attempt + 1}")
-                        await asyncio.sleep(2)
+                        logging.debug(f"Captcha still processing. Waiting 10 seconds before next attempt.")
+                        await asyncio.sleep(10)
                     else:
-                        raise Exception(f"Error solving captcha: {result.get('errorDescription')}")
-            raise Exception("Failed to solve captcha after maximum attempts")
+                        logging.error(f"Unexpected captcha status: {result.get('status')}")
+                        return None
+
+            logging.error(f"Captcha solving timed out after {CAPTCHA_TIMEOUT} seconds")
+            return None
+
         except Exception as e:
             logging.error(f"Error in solve_captcha: {str(e)}")
             return None
@@ -180,6 +186,7 @@ async def login_and_get_cookie(account: Account) -> bool:
             logging.error("Failed to solve captcha")
             return False
 
+        # Inject the captcha response
         driver.execute_script(f"""
             document.getElementById('g-recaptcha-response').innerHTML = '{captcha_response}';
             grecaptcha.getResponse = function() {{ return '{captcha_response}'; }};
@@ -188,7 +195,10 @@ async def login_and_get_cookie(account: Account) -> bool:
 
         # Submit the form
         logging.info("Submitting login form")
-        driver.find_element(By.ID, "login-button").click()
+        login_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "login-button"))
+        )
+        login_button.click()
 
         # Wait for login to complete with timeout
         logging.info("Waiting for login to complete")
@@ -199,10 +209,10 @@ async def login_and_get_cookie(account: Account) -> bool:
             logging.error("Login timed out")
             return False
 
-        # Retrieve the ACT_SSO_COOKIE
-        logging.info("Retrieving cookies")
-        cookies = driver.get_cookies()
-        sso_cookie = next((cookie for cookie in cookies if cookie["name"] == "ACT_SSO_COOKIE"), None)
+        # Retrieve only the SSO cookie
+        logging.info("Retrieving SSO cookie")
+        all_cookies = driver.get_cookies()
+        sso_cookie = next((cookie for cookie in all_cookies if cookie["name"] == "ACT_SSO_COOKIE"), None)
 
         if sso_cookie:
             logging.info("Successfully retrieved SSO cookie")
