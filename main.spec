@@ -3,9 +3,8 @@
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
     binaries=[],
-    datas=[('config.json', '.'), ('accounts.json', '.'), ('login_credentials.json', '.')],
+    datas=[('accounts.json', '.'), ('icon.ico','.'), ('config.json', '.'), ('login_credentials.json', '.'), ('chrome', 'chrome'), ('chromedriver', 'chromedriver')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +21,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='main',
+    name='CODStatus_Personal_Checker_2.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,4 +34,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['icon.ico'],
 )
