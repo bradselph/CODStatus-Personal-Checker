@@ -6,3 +6,4 @@
 *.json
 *.exe
 *.txt
+/codstatus_env
