@@ -7,3 +7,4 @@
 *.exe
 *.txt
 /codstatus_env
+/chrome
