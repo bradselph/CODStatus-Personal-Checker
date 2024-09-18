@@ -8,3 +8,4 @@
 *.txt
 /codstatus_env
 /chrome
+/build
