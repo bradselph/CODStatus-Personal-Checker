@@ -10,9 +10,9 @@ import undetected_chromedriver as uc
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
-    QInputDialog, QAction, QDialog, QFormLayout, QLineEdit, QDialogButtonBox,
-    QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit,
-    QLabel, QListWidget, QMessageBox, QProgressDialog, QFileDialog, QGroupBox, QDockWidget, QGridLayout
+	QInputDialog, QAction, QDialog, QFormLayout, QLineEdit, QDialogButtonBox,
+	QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit,
+	QLabel, QListWidget, QMessageBox, QProgressDialog, QFileDialog, QGroupBox, QDockWidget, QGridLayout
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
