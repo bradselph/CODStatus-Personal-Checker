@@ -1,5 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# TODO: Critical packaging error - JSON data files may not exist at build time
+# WHY: The datas list includes 'accounts.json', 'config.json', and 'login_credentials.json' which are
+# runtime-generated files that may not exist when PyInstaller builds the executable.
+# If these files don't exist at build time, PyInstaller will fail or silently skip them.
+# FIX: Either create empty template versions of these files for packaging, or make them optional
+# by checking if they exist before adding to datas, e.g., using conditional logic or --add-data flags.
+
+# TODO: Chrome/chromedriver directories may not exist or may be platform-specific
+# WHY: The spec file hardcodes ('chrome', 'chrome') and ('chromedriver', 'chromedriver') paths,
+# but these directories might not exist on all build machines. Also, the paths in main.py use
+# .exe extensions (line 28-29: "chrome/chrome.exe", "chromedriver/chromedriver.exe") which are
+# Windows-specific, but this spec file doesn't indicate platform restrictions.
+# FIX: Add validation to ensure chrome and chromedriver directories exist, or make them optional.
+# Consider platform-specific builds or document that this only works on Windows.
 
 a = Analysis(
     ['main.py'],

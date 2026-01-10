@@ -1,3 +1,15 @@
+# TODO: CRITICAL ERROR - Completely wrong build configuration for a Python project
+# WHY: This workflow is configured to build a Go project (name: "Go", setup-go, go build),
+# but this repository contains a Python application (main.py, PyQt5, PyInstaller spec file).
+# The workflow will fail immediately because:
+# 1. There are no Go source files (.go files) in the repository
+# 2. The project requires Python, PyQt5, PyInstaller, undetected-chromedriver, etc.
+# 3. The expected output is CODStatus_Personal_Checker_2.0.exe (from main.spec line 24), not CODStatusPersonalChecker.exe
+# FIX: Replace this entire workflow with a Python build workflow that:
+# - Uses actions/setup-python instead of actions/setup-go
+# - Installs dependencies (pip install -r requirements.txt)
+# - Runs PyInstaller with main.spec: pyinstaller main.spec
+# - Uploads the correct executable name: CODStatus_Personal_Checker_2.0.exe
 name: Go
 
 on:
@@ -17,20 +29,34 @@ jobs:
       with:
         go-version: '1.22.5'
 
+    # TODO: This build step will FAIL - no Go files exist in this Python project
+    # FIX: Replace with: pip install -r requirements.txt && pyinstaller main.spec
     - name: Build
       run: go build .
 
+    # TODO: Wrong artifact path - this file will never exist
+    # WHY: The build step tries to compile Go code which doesn't exist, so CODStatusPersonalChecker.exe
+    # will never be created. The actual PyInstaller output (if it were run) would be in dist/ directory
+    # with name CODStatus_Personal_Checker_2.0.exe (from main.spec line 24).
+    # FIX: Change path to ./dist/CODStatus_Personal_Checker_2.0.exe after fixing the build step.
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: CODStatusPersonalChecker
         path: ./CODStatusPersonalChecker.exe
 
+    # TODO: Inappropriate test coverage upload - this is not a test run and produces no coverage data
+    # WHY: This workflow builds an executable, it doesn't run tests. There's no test execution step
+    # and no coverage data is generated, making this codecov upload step pointless and will fail.
+    # FIX: Remove this step, or add a separate test workflow that runs pytest with coverage before uploading.
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4.0.1
       with:
          token: ${{ secrets.CODECOV_TOKEN }}
-    
+
+    # TODO: Wrong release asset path and name - same issue as Upload Artifact step
+    # WHY: Tries to upload CODStatusPersonalChecker.exe which doesn't exist due to wrong build configuration.
+    # FIX: Change asset_path to ./dist/CODStatus_Personal_Checker_2.0.exe and update asset_name accordingly.
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: actions/upload-release-asset@v1

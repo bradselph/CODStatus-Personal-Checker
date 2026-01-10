@@ -1,11 +1,36 @@
 
 /.idea
 /ignore experimental
+# TODO: Duplicate entries - /ignore_experimental appears twice
+# WHY: Lines 4 and 5 are identical, creating redundant ignore rules.
+# FIX: Remove one of the duplicate /ignore_experimental lines.
 /ignore_experimental
 /ignore_experimental
+# TODO: Overly broad pattern may break build process
+# WHY: *.json ignores ALL JSON files, but main.spec (line 7) requires accounts.json, config.json,
+# and login_credentials.json to exist at build time. If these files are not tracked (or template versions
+# are not committed), PyInstaller builds will fail. Also prevents committing a requirements or package.json if needed.
+# FIX: Use more specific patterns like /accounts.json, /config.json, /login_credentials.json instead of *.json,
+# or commit empty template versions of these files.
 *.json
+# TODO: Overly broad pattern ignores required Chrome/ChromeDriver executables
+# WHY: *.exe ignores all executables, but the application depends on chrome/chrome.exe and chromedriver/chromedriver.exe
+# (referenced at lines 28-29 in main.py and included in main.spec line 7). If these are ignored, the application
+# cannot function and builds will be incomplete.
+# FIX: Use specific patterns like /*.exe or /dist/*.exe to ignore build outputs only, and explicitly track
+# chrome/chrome.exe and chromedriver/chromedriver.exe with negation patterns: !chrome/chrome.exe, !chromedriver/chromedriver.exe
 *.exe
+# TODO: Overly broad pattern may ignore important documentation files
+# WHY: *.txt ignores all text files, potentially including requirements.txt (Python dependencies),
+# documentation files, licenses, or other important project files.
+# FIX: Use more specific patterns or track requirements.txt explicitly with !requirements.txt
 *.txt
 /codstatus_env
+# TODO: Ignoring /chrome directory conflicts with application requirements
+# WHY: The application requires chrome/chrome.exe (main.py line 28, main.spec line 7), but this line
+# ignores the entire chrome directory. This creates a conflict where the app needs the directory
+# but git ignores it, making distribution impossible without manual setup.
+# FIX: Either remove this line and track chrome/ with proper .exe handling above, or document that
+# users must manually download and place Chrome in this directory.
 /chrome
 /build

@@ -1,3 +1,32 @@
+"""
+CODStatus Personal Checker - Call of Duty Account Status Management Application
+
+CRITICAL ISSUES SUMMARY (see detailed TODOs throughout the file):
+==================================================================
+1. BROKEN ACCOUNT CREATION - Account constructor called with wrong parameter order in 3 locations
+   (lines 279, 475, 1100). This CORRUPTS all account data. See TODOs at those lines.
+
+2. DATA LOSS ON RESTART - Linked account IDs (PSN, XBL, Steam, Battle), ban info, and can_appeal
+   are fetched but NEVER saved to JSON (save_accounts line 707). See TODO at line 708.
+
+3. BROKEN CANCELLATION - Progress dialogs have no cancel button (setCancelButton(None) at line 620)
+   but code tries to connect to canceled signal and check wasCanceled(). See TODOs at lines 510, 570, 614, 690.
+
+4. SIGNAL/SLOT TYPE MISMATCH - accounts_updated signal emits a list but save_accounts takes no params,
+   causing TypeError at runtime. See TODO at line 503.
+
+5. INCOMPLETE FEATURE - Cookie expiration info only shown for BANNED accounts due to early return.
+   Non-banned accounts never see cookie expiry. See TODO at line 824.
+
+6. API KEY TYPO - solve_login_captcha uses "appid" instead of "appId", inconsistent with
+   solve_status_check_captcha. May cause API failures. See TODO at line 1112.
+
+7. WRONG BUILD SYSTEM - GitHub workflow tries to build with Go instead of Python. Will always fail.
+   See .github/workflows/GoBuild.yml TODOs.
+
+8. MISSING DEPENDENCIES FILE - No requirements.txt file exists for this Python project, making
+   installation and CI/CD impossible.
+"""
 import os
 import base64
 import json
@@ -19,6 +48,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 # Constants
+# TODO: Dead code - These commented-out path definitions are never used and are redefined at lines 28-29.
+# WHY: These lines serve no purpose and create confusion about which constants are actually used.
+# FIX: Remove these commented lines entirely to clean up the codebase.
 #CHROME = os.path.join(os.path.dirname(sys.executable), "chrome", "chrome.exe")
 #DRIVER = os.path.join(os.path.dirname(sys.executable), "chromedriver", "chromedriver.exe")
 icon_path = os.path.abspath('icon.ico')
@@ -51,6 +83,10 @@ class Config:
         self.extra_options_mode = extra_options_mode
 
 class Account:
+    # TODO: Missing attribute initialization - cookie_error and can_appeal are not initialized
+    # WHY: These attributes are set conditionally at runtime (cookie_error at line 744, can_appeal at line 730)
+    # but never initialized in __init__, causing potential AttributeError or requiring hasattr checks everywhere
+    # FIX: Add self.cookie_error = None and self.can_appeal = False to __init__ method
     def __init__(self, email, username, uno_id, sso_cookie, password="", platform="", last_status=""):
         self.email = email
         self.username = username
@@ -66,7 +102,15 @@ class Account:
         self.steam_id = None
         self.battle_id = None
         self.bans = []
+        # TODO: Linked account IDs (psn_id, xbl_id, steam_id, battle_id) are fetched at lines 738-741
+        # but are NEVER saved to accounts.json in save_accounts (lines 644-660).
+        # WHY: This means linked account data is lost every time the application restarts.
+        # FIX: Add psn_id, xbl_id, steam_id, battle_id to the accounts_data dictionary in save_accounts method
+        # and load them back in load_accounts method (lines 662-685).
 
+    # TODO: Redundant method - add_status does exactly the same thing as update_status
+    # WHY: Both methods set last_status and last_check_time identically. Having two methods is confusing.
+    # FIX: Remove add_status and use update_status everywhere, or clarify the distinction if there should be one.
     def add_status(self, status):
         timestamp = datetime.now().isoformat()
         self.last_status = status
@@ -255,6 +299,12 @@ class MainWindow(QMainWindow):
                     self.log(f"Account not added: {account_info ['email']}(already exists)")
                     return
             else:
+                # TODO: CRITICAL BUG - Account constructor parameters are in WRONG ORDER
+                # WHY: Account.__init__ signature is (email, username, uno_id, sso_cookie, password, platform, last_status)
+                # but this call passes sso_cookie as uno_id, password as sso_cookie, and empty string as password.
+                # This will cause all account data to be corrupted and authentication to fail.
+                # FIX: Change to Account(account_info["email"], account_info["username"], "", account_info["sso_cookie"], account_info["password"], "", "")
+                # or better yet: Account(email, username, uno_id="", sso_cookie=sso_cookie, password=password, platform="", last_status="")
                 new_account = Account(
                     account_info ["email"],
                     account_info ["username"],
@@ -353,7 +403,12 @@ class MainWindow(QMainWindow):
         config.extra_options_mode = state
         self.save_config()
         self.log(f"Extra Options Mode {'enabled' if state else 'disabled'}")
-    
+
+    # TODO: Dead code - set_busy method is defined but NEVER called anywhere in the application
+    # WHY: This method was likely intended to show a busy cursor and disable UI during long operations,
+    # but progress dialogs are used instead (e.g., lines 466, 482, 526, 623).
+    # FIX: Either remove this method if it's truly unused, or integrate it into long-running operations
+    # by calling self.set_busy(True) before operations and self.set_busy(False) after completion.
     def set_busy(self, busy):
         QApplication.setOverrideCursor(Qt.WaitCursor if busy else Qt.ArrowCursor)
         self.setEnabled(not busy)
@@ -441,6 +496,11 @@ class MainWindow(QMainWindow):
                             existing_account.password = password
                             accounts_updated += 1
                         else:
+                            # TODO: CRITICAL BUG - Account constructor parameters are in WRONG ORDER
+                            # WHY: Account.__init__ signature is (email, username, uno_id, sso_cookie, password, platform, last_status)
+                            # but this call passes empty strings for username, uno_id, sso_cookie, and then password as platform parameter.
+                            # This will corrupt account data and prevent authentication from working.
+                            # FIX: Change to Account(email, "", "", "", password, "", "") with password in the correct 5th position.
                             new_account = Account(email, "", "", "", password)
                             accounts.append(new_account)
                             accounts_added += 1
@@ -469,8 +529,18 @@ class MainWindow(QMainWindow):
         self.check_accounts_thread.log_message.connect(self.log)
         self.check_accounts_thread.progress_updated.connect(self.update_progress)
         self.check_accounts_thread.finished.connect(self.on_check_accounts_finished)
+        # TODO: CRITICAL BUG - Signal/slot parameter mismatch will cause TypeError at runtime
+        # WHY: accounts_updated signal emits self.accounts (a list) at line 710, but save_accounts method
+        # (line 644) takes NO parameters. PyQt will raise TypeError when trying to call save_accounts(list).
+        # FIX: Either change signal emission to emit no parameters, or create a wrapper slot that ignores the parameter,
+        # e.g., lambda _: self.save_accounts() or change save_accounts to accept an optional parameter.
         self.check_accounts_thread.accounts_updated.connect(self.save_accounts)
         self.check_accounts_thread.start()
+        # TODO: Broken cancel functionality - progress dialog has no cancel button but we connect to canceled signal
+        # WHY: At line 569, setCancelButton(None) removes the cancel button from progress dialogs, so the
+        # canceled signal will NEVER be emitted, making this connection useless.
+        # FIX: Either remove setCancelButton(None) and add a cancel button to progress dialogs, or remove
+        # all .canceled.connect() calls and cancel logic from threads.
         self.progress_dialog.canceled.connect(self.check_accounts_thread.cancel)
         
     def check_selected_account(self):
@@ -526,6 +596,10 @@ class MainWindow(QMainWindow):
         self.progress_dialog = self.show_progress_dialog("Validating SSO Cookies")
         self.progress_dialog.setMaximum(len(accounts))
         for i, account in enumerate(accounts):
+            # TODO: Broken cancel check - wasCanceled() will always return False
+            # WHY: Progress dialog created at line 566 has setCancelButton(None) at line 569,
+            # so there's no cancel button and wasCanceled() will never return True.
+            # FIX: Either add a cancel button by changing/removing setCancelButton(None), or remove this check.
             if self.progress_dialog.wasCanceled():
                 break
             self.progress_dialog.setValue(i)
@@ -566,6 +640,12 @@ class MainWindow(QMainWindow):
         progress_dialog = QProgressDialog(self)
         progress_dialog.setWindowTitle(title)
         progress_dialog.setRange(0, 100)
+        # TODO: Inconsistent cancel button configuration breaks cancel functionality throughout the app
+        # WHY: setCancelButton(None) removes the cancel button, but multiple places in the code try to
+        # connect to progress_dialog.canceled signal (lines 515, 665) and check wasCanceled() (line 574).
+        # These will never work because there's no cancel button to trigger the canceled signal.
+        # FIX: Either remove this line to enable cancel buttons, or remove all cancel-related code
+        # (canceled.connect calls and wasCanceled checks) throughout the application.
         progress_dialog.setCancelButton(None)
         progress_dialog.setWindowModality(Qt.WindowModal)
         return progress_dialog
@@ -594,6 +674,10 @@ class MainWindow(QMainWindow):
             if account.account_age:
                 details.append(f"Account Age: {account.account_age}")
             linked_accounts = []
+            # TODO: Redundant hasattr checks - these attributes are always initialized in Account.__init__
+            # WHY: psn_id, xbl_id, steam_id, and battle_id are initialized to None in Account.__init__ (lines 71-74),
+            # so hasattr will always return True. These checks are unnecessary overhead.
+            # FIX: Remove hasattr checks and just check truthiness: if account.psn_id: ...
             if hasattr(account, 'psn_id') and account.psn_id:
                 linked_accounts.append(f"- psn: {account.psn_id}")
             if hasattr(account, 'xbl_id') and account.xbl_id:
@@ -615,6 +699,11 @@ class MainWindow(QMainWindow):
             self.account_details.setText("\n".join(details))
         else:
             self.account_details.setText("No account selected or account not found.")
+        # TODO: cookie_error is logged but never displayed in the UI details
+        # WHY: cookie_error is set at line 744 when cookie decoding fails, but it's only logged here
+        # and never added to the details list shown in the account_details text edit.
+        # FIX: Add cookie error to the details list if it exists, e.g., details.append(f"Cookie Error: {account.cookie_error}")
+        # Also, cookie_error attribute is not initialized in Account.__init__ (see TODO at line 57).
         if account and hasattr(account, 'cookie_error') and account.cookie_error:
             self.log(f"Cookie Error for {account.email}: {account.cookie_error}")
 
@@ -627,6 +716,9 @@ class MainWindow(QMainWindow):
         self.login_thread.log_message.connect(self.log)
         self.login_thread.finished.connect(self.on_login_finished)
         self.login_thread.start()
+        # TODO: Broken cancel functionality - progress dialog has no cancel button (see TODO at line 614)
+        # WHY: setCancelButton(None) in show_progress_dialog means canceled signal will never be emitted.
+        # FIX: Remove this line or fix show_progress_dialog to include a cancel button.
         self.progress_dialog.canceled.connect(self.login_thread.cancel)
 
     def update_progress(self, value):
@@ -642,6 +734,16 @@ class MainWindow(QMainWindow):
             self.progress_dialog.close()
 
     def save_accounts(self):
+        # TODO: Critical data loss - multiple account attributes are NOT saved to JSON
+        # WHY: The following attributes are fetched/set during runtime but never persisted:
+        # - psn_id, xbl_id, steam_id, battle_id (set at lines 738-741)
+        # - bans list (set at line 731)
+        # - can_appeal (set at line 730)
+        # - password (stored in Account object but not saved here, causing loss on app restart)
+        # This means all linked account IDs, ban information, and passwords are lost when the app closes.
+        # FIX: Add these fields to the accounts_data dictionary: "psn_id": account.psn_id, "xbl_id": account.xbl_id,
+        # "steam_id": account.steam_id, "battle_id": account.battle_id, "bans": account.bans,
+        # "can_appeal": getattr(account, 'can_appeal', False), "password": account.password
         accounts_data = [
             {
                 "email": account.email,
@@ -677,6 +779,16 @@ class MainWindow(QMainWindow):
                     )
                     new_account.last_check_time = acc_data.get("last_check_time")
                     new_account.account_age = acc_data.get("account_age", "Unknown")
+                    # TODO: Missing attribute loading - psn_id, xbl_id, steam_id, battle_id, bans, can_appeal are never loaded
+                    # WHY: These attributes are not saved in save_accounts (see TODO at line 708), so even if they were
+                    # in the JSON, they wouldn't be loaded here. This creates incomplete account restoration on app restart.
+                    # FIX: After fixing save_accounts to save these fields, add loading code here:
+                    # new_account.psn_id = acc_data.get("psn_id")
+                    # new_account.xbl_id = acc_data.get("xbl_id")
+                    # new_account.steam_id = acc_data.get("steam_id")
+                    # new_account.battle_id = acc_data.get("battle_id")
+                    # new_account.bans = acc_data.get("bans", [])
+                    # new_account.can_appeal = acc_data.get("can_appeal", False)
                     accounts.append(new_account)
             self.log(f"Loaded {len(accounts)} accounts")
         except FileNotFoundError:
@@ -688,6 +800,10 @@ class CheckAccountsThread(QThread):
     progress_updated = pyqtSignal(int)
     log_message = pyqtSignal(str)
     finished = pyqtSignal()
+    # TODO: Unused signal parameter - accounts_updated emits a list that is never used by connected slots
+    # WHY: This signal is emitted with self.accounts at line 710, but connected to save_accounts at line 508
+    # which takes NO parameters, causing a TypeError. The list parameter serves no purpose.
+    # FIX: Change to pyqtSignal() without parameters, and emit without arguments at line 710.
     accounts_updated = pyqtSignal(list)
     
     def __init__(self, accounts, config):
@@ -727,14 +843,26 @@ class CheckAccountsThread(QThread):
             data = response.json()
             if data.get("error"):
                 return f"API error: {data['error']}"
+            # TODO: can_appeal attribute is set but NEVER saved or used elsewhere in the application
+            # WHY: This attribute is set here but not persisted in save_accounts (line 707) and not displayed
+            # in account details (display_account_details at line 628). It's completely unused.
+            # FIX: Either save this attribute and display it in the UI, or remove this line if it's not needed.
             account.can_appeal = data.get('canAppeal', False)
             account.bans = data.get('bans', [])
             if not account.bans:
+                # TODO: Critical bug - Cookie expiration info is ONLY shown for banned accounts
+                # WHY: Early return here prevents cookie_status from being calculated and returned for non-banned accounts.
+                # Users with clean accounts never see their cookie expiration time, making it hard to know when re-login is needed.
+                # FIX: Move cookie decoding logic (lines 830-844) before the ban check and include it in the return value for all accounts.
                 return "Account not banned"
             status = self.determine_ban_status(account.bans)
             profile_response = requests.get(PROFILE_URL, headers=headers)
             if profile_response.status_code == 200:
                 profile_data = profile_response.json()
+                # TODO: Potential exception - profile_data.get('accounts', []) may contain dicts without 'provider' or 'username' keys
+                # WHY: The next() comprehension assumes all account dicts have 'provider' and 'username' keys.
+                # If a malformed account dict is returned by the API, accessing acc['provider'] will raise KeyError.
+                # FIX: Use acc.get('provider') and acc.get('username') instead of direct key access.
                 account.psn_id = next((acc['username'] for acc in profile_data.get('accounts', []) if acc['provider'] == 'psn'), None)
                 account.xbl_id = next((acc['username'] for acc in profile_data.get('accounts', []) if acc['provider'] == 'xbl'), None)
                 account.steam_id = next((acc['username'] for acc in profile_data.get('accounts', []) if acc['provider'] == 'steam'), None)
@@ -746,9 +874,19 @@ class CheckAccountsThread(QThread):
                 status += f"\n{cookie_status}"
             return status
         except Exception as e:
+            # TODO: Overly broad exception handling masks specific errors
+            # WHY: Catching all Exception types makes debugging difficult and can hide serious issues like
+            # network errors, authentication failures, or JSON parsing errors. Users only see "Error: ..."
+            # without understanding what went wrong or how to fix it.
+            # FIX: Catch specific exceptions (requests.RequestException, json.JSONDecodeError, KeyError, etc.)
+            # and provide actionable error messages for each type.
             return f"Error: {str(e)}"
 
     def determine_ban_status(self, bans):
+        # TODO: Potential KeyError - assumes all ban dicts have 'enforcement' key
+        # WHY: Lines 851 and 858 directly access ban["enforcement"] without using .get(), which will
+        # raise KeyError if the API returns a malformed ban dict without this field.
+        # FIX: Use ban.get("enforcement", "UNKNOWN") instead of ban["enforcement"].
         if any(ban["enforcement"] == "PERMANENT" for ban in bans):
             if any(ban.get("bar", {}).get("Status") == "Open" for ban in bans):
                 return "Permanently banned (Appeal Open)"
@@ -775,6 +913,11 @@ class CheckAccountsThread(QThread):
                 created = iso8601.parse_date(created_date)
                 now = datetime.now(timezone.utc)
                 age = now - created
+                # TODO: Inaccurate date calculation - assumes all months have 30 days
+                # WHY: Using (age.days % 365) // 30 for months incorrectly treats all months as 30 days,
+                # causing inaccurate age calculations. A year doesn't have exactly 12 * 30 = 360 days.
+                # FIX: Use relativedelta from dateutil.relativedelta for accurate year/month/day calculations,
+                # or at minimum document that ages are approximate.
                 years = age.days // 365
                 months =(age.days % 365) // 30
                 days =(age.days % 365) % 30
@@ -782,6 +925,8 @@ class CheckAccountsThread(QThread):
             else:
                 return "Unknown"
         except Exception as e:
+            # TODO: Overly broad exception handling - same issue as check_account method (see TODO at line 848)
+            # FIX: Catch specific exceptions for better error reporting.
             return f"Error: {str(e)}"
 
     def decode_sso_cookie(self, sso_cookie):
@@ -790,12 +935,17 @@ class CheckAccountsThread(QThread):
             parts = decoded_cookie.split(':')
             if len(parts) != 3:
                 return "Unexpected cookie format"
-            
+
             account_id, expiration_timestamp, hash_value = parts
+            # TODO: Potential ValueError - int() conversion can fail on malformed timestamp
+            # WHY: If expiration_timestamp contains non-numeric characters or is malformed,
+            # int(expiration_timestamp) will raise ValueError, jumping to the generic exception handler.
+            # FIX: Validate that expiration_timestamp is numeric before converting, or catch ValueError
+            # specifically to provide a clear "Invalid cookie timestamp format" message.
             expiration_date = datetime.fromtimestamp(int(expiration_timestamp), tz = timezone.utc)
             now = datetime.now(timezone.utc)
             time_left = expiration_date - now
-            
+
             if time_left.total_seconds() > 0:
                 days_left = time_left.days
                 hours_left = time_left.seconds // 3600
@@ -804,6 +954,10 @@ class CheckAccountsThread(QThread):
             else:
                 return "Cookie has expired"
         except Exception as e:
+            # TODO: Overly broad exception handling - catches base64 errors, decode errors, and conversion errors together
+            # WHY: Different error types (base64.binascii.Error, UnicodeDecodeError, ValueError) have different
+            # causes and solutions, but all are reported as generic "Error decoding cookie".
+            # FIX: Catch specific exceptions and provide targeted error messages for each failure mode.
             return f"Error decoding cookie: {str(e)}"
 
     def solve_status_check_captcha(self):
@@ -864,6 +1018,10 @@ class LoginThread(QThread):
         self.save_accounts = save_accounts_func
         self.is_cancelled = False
 
+        # TODO: Redundant attribute assignment - DRIVER and CHROME are already defined as module-level constants
+        # WHY: These exact same values are defined at lines 28-29 as CHROME and DRIVER constants.
+        # Duplicating them as instance attributes is unnecessary and creates maintenance burden.
+        # FIX: Remove these lines and use the module-level constants directly (DRIVER and CHROME).
         self.DRIVER = "chromedriver/chromedriver.exe"
         self.CHROME = "chrome/chrome.exe"
 
@@ -897,6 +1055,11 @@ class LoginThread(QThread):
         options.binary_location = self.CHROME
         if self.config.extra_options_mode:
             options.add_argument('--start-minimized')
+            # TODO: Dead code - Multiple Chrome options are commented out and serve no purpose
+            # WHY: These commented-out options suggest incomplete feature implementation or abandoned configuration.
+            # They provide no value and clutter the codebase, making it unclear what extra_options_mode actually does.
+            # FIX: Either uncomment and enable these options if they're needed for extra_options_mode functionality,
+            # or remove them entirely to clean up the code. Document what extra_options_mode is supposed to do.
             #options.add_argument('--enable-fast-unload')
             #options.add_argument('--disable-gpu')
             #options.add_argument('--enable-precache')
@@ -909,6 +1072,11 @@ class LoginThread(QThread):
         options.add_argument('--window-size=200,100')
         driver = None
         try:
+            # TODO: Missing error handling - ChromeDriver initialization can fail in multiple ways
+            # WHY: If chromedriver.exe is missing, wrong version, or Chrome binary is not found,
+            # uc.Chrome() will raise exceptions that aren't caught here, causing the entire thread to crash.
+            # FIX: Add try-except around driver initialization with specific error messages for common failures
+            # (missing chromedriver, version mismatch, missing Chrome binary).
             driver = uc.Chrome(options=options, driver_executable_path=self.DRIVER)
             driver.get(SUPPORT_URL)
             login_link = WebDriverWait(driver, 10).until(
@@ -922,6 +1090,11 @@ class LoginThread(QThread):
             if not captcha_response:
                 self.log_message.emit("Failed to solve captcha")
                 return False, None
+            # TODO: Potential XSS/injection risk - captcha_response is inserted into JavaScript without escaping
+            # WHY: If captcha_response contains quotes or special characters, it could break the JavaScript
+            # string literal and cause syntax errors or unexpected behavior. While captcha_response should be
+            # base64-encoded (safe), this is still a risky pattern.
+            # FIX: Use json.dumps() or proper JavaScript escaping for captcha_response before inserting into script.
             driver.execute_script(
                 f"""
                 document.getElementById('g-recaptcha-response').innerHTML = '{captcha_response}';
@@ -930,6 +1103,11 @@ class LoginThread(QThread):
             )
             login_button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.ID, "login-button")))
             login_button.click()
+            # TODO: Insufficient error handling - login failure is not detected
+            # WHY: This waits for URL to contain "support.activision.com" but doesn't verify successful login.
+            # If login fails (wrong password, rate limiting, captcha rejected), the page might redirect elsewhere
+            # or show an error, but the code doesn't check for these conditions. It will timeout and fail generically.
+            # FIX: After clicking login, check for error messages or failed login indicators before assuming success.
             WebDriverWait(driver, LOGIN_TIMEOUT).until(EC.url_contains("support.activision.com"))
             sso_cookie = self.get_sso_cookie(driver)
             if not sso_cookie:
@@ -982,6 +1160,13 @@ class LoginThread(QThread):
             existing_account.uno_id = account_info["uno_id"]
             existing_account.sso_cookie = account_info["sso_cookie"]
         else:
+            # TODO: CRITICAL BUG - Account constructor parameters are in WRONG ORDER
+            # WHY: Account.__init__ signature is (email, username, uno_id, sso_cookie, password, platform, last_status)
+            # but this call passes: email, username, sso_cookie (as uno_id), "" (as sso_cookie), "" (as password)
+            # This completely corrupts the account data - sso_cookie goes into uno_id field and sso_cookie field gets empty string.
+            # Authentication will fail because sso_cookie is in the wrong field.
+            # FIX: Change to Account(account_info["email"], account_info["username"], account_info["uno_id"],
+            # account_info["sso_cookie"], "", "", "")
             new_account = Account(
                 account_info["email"],
                 account_info["username"],
@@ -994,6 +1179,11 @@ class LoginThread(QThread):
     def solve_login_captcha(self):
         create_task_payload = {
             "clientKey": self.config.ez_captcha_key,
+            # TODO: CRITICAL BUG - Incorrect JSON key will cause API request to fail
+            # WHY: The key is "appid" but should be "appId" (camelCase). Compare with line 912 in
+            # solve_status_check_captcha which correctly uses "appId". This inconsistency will cause
+            # the EZ-Captcha API to reject the request or ignore the app ID, leading to login failures.
+            # FIX: Change "appid" to "appId" to match the correct API specification.
             "appid": EZ_CAPTCHA_APP_ID,
             "task": {
                 "type": "ReCaptchaV2TaskProxyless",

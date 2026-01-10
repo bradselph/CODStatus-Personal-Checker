@@ -6,6 +6,11 @@ and updating account information.
 
 ## Features
 
+<!-- TODO: Incomplete feature - Linked platform IDs are NOT persisted
+WHY: While the app fetches PSN, XBL, Steam, and Battle.net IDs (main.py lines 837-840),
+these are never saved in accounts.json (save_accounts at line 707) and are lost on restart.
+FIX: Update documentation to note that linked platforms are only shown during the current session,
+or fix the save_accounts function to persist these fields. -->
 - Manage multiple Call of Duty accounts
 - Validate SSO cookies
 - Check account status and ban information
@@ -109,6 +114,12 @@ Note: SSO cookies expire after 14 days. If you only provide an SSO cookie, you'l
 - **Check All Accounts**: Checks the status of all accounts in the list.
 - **Check Captcha Balance**: Displays your current EZ-Captcha balance.
 - **Refresh Accounts**: Reloads the account list from the saved file.
+<!-- TODO: Misleading documentation - Extra Options Mode functionality is unclear and mostly disabled
+WHY: The feature is marked "currently in development" but in main.py line 1001-1016, extra_options_mode
+only enables '--start-minimized' Chrome argument. Nine other Chrome options are commented out with no
+explanation of when/if they'll be enabled. Users enabling this won't see any meaningful change.
+FIX: Either document what extra_options_mode actually does (only minimizes Chrome window), or complete
+the feature by uncommenting and testing the other Chrome options, or remove this feature entirely. -->
 - **Extra Options Mode**: Enables additional Chrome options (currently in development).
 
 ## Configuration
@@ -125,7 +136,14 @@ The application uses a `config.json` file for storing settings. While it's possi
 
 ## Troubleshooting
 
-1. **Invalid SSO Cookie**: 
+<!-- TODO: Missing critical information - progress dialogs cannot be cancelled
+WHY: The code creates progress dialogs with no cancel button (main.py line 620: setCancelButton(None)),
+but the UI doesn't inform users that long-running operations cannot be interrupted. Users may think the
+app has frozen when checking many accounts.
+FIX: Add a troubleshooting note: "Progress operations cannot be cancelled once started. Wait for completion
+or force-quit the application." Better yet, fix the code to enable cancel buttons. -->
+
+1. **Invalid SSO Cookie**:
    - For manually added SSO cookies: Log out of your Call of Duty account and log back in to obtain a
      fresh SSO cookie.
    - Update the account in the application with the new SSO cookie.
@@ -165,6 +183,21 @@ The application uses a `config.json` file for storing settings. While it's possi
    CAPTCHA solving.
 
 ## Technical Details
+
+<!-- TODO: CRITICAL MISSING FILE - No requirements.txt exists for dependency management
+WHY: This Python project has no requirements.txt file listing dependencies (PyQt5, selenium,
+undetected-chromedriver, requests, iso8601, etc.). This makes:
+- Manual installation unclear (users don't know what to pip install)
+- Automated builds impossible (CI/CD can't install dependencies)
+- Version control problematic (no way to ensure compatible package versions)
+FIX: Create requirements.txt with all dependencies and their versions:
+PyQt5==5.15.x
+selenium==4.x.x
+undetected-chromedriver==3.x.x
+requests==2.x.x
+iso8601==2.x.x
+Also, .gitignore currently ignores *.txt files (line 27), which would prevent requirements.txt from
+being tracked. The .gitignore needs to be fixed first (see TODOs in .gitignore). -->
 
 - The application is built using Python and PyQt5 for the GUI.
 - It uses Selenium WebDriver with undetected-chromedriver for web automation.
